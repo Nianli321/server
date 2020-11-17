@@ -2,6 +2,7 @@
 from socket import *
 import sys
 import os
+import re
 
 def check_command(command):
     all_commands = ["CRT", "MSG", "DLT", "EDT", "LST", "RDT", "UPD", "DWN", "RMV", "XIT", "SHT"]
@@ -67,7 +68,24 @@ while(1):
         reply = clientSocket.recv(1024).decode("utf-8")  
         print(reply)  
 
-
+    elif comm.split()[0] == "RDT":
+        clientSocket.sendall(comm.encode())
+        reply = clientSocket.recv(1024)
+        if reply == b"R":
+            thread = ""
+            while (1):
+                line = clientSocket.recv(1024)               
+                if line == b"finish":
+                    break
+                thread = thread + line.decode("utf-8") 
+            thread = thread.split("\n")
+            thread.pop(0)   
+            for l in thread:
+                print(l)        
+        elif reply == b"fail":
+            print("the thread doesn't exist")      
+        else:
+            print(reply.decode("utf-8"))
 
     else:
         clientSocket.sendall(comm.encode())

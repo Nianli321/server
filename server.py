@@ -183,13 +183,30 @@ def edit_message(username, title, n_msg, message):
     else:
         thread.edit_msg(n_msg, message)
 
+def read_thread(title):
+    thread = find_thread(title)
+    if thread == False:
+        print("reading failed, {} thread doesn't exist".format(title))
+        conn.send(b"fail")
+    else:
+        conn.send(b"R") #tell the client to get ready to revice content in the thread
+        with open(title, "rb") as f:
+            line = f.read(1024)
+            while line:
+                conn.send(line)
+                line = f.read(1024)
+        conn.send(b"finish")        
+            
+
+
+
 def upload_file(username, title, filename):
     thread = find_thread(title)
     if thread == False:
         print("uploading failed, {} thread doesn't exist".format(title))
         conn.sendall("uploading failed, {} thread doesn't exist".format(title).encode())
     else:
-        print("HAH")
+
         with open(title + "-" + filename, "wb") as f:
             while (1):
                 line = conn.recv(1024)
@@ -299,11 +316,19 @@ if __name__ == "__main__":
 
         elif comm.split()[0] == "UPD":
             if len(comm.split()) == 3:
-                print("nihao")
                 upload_file(username, comm.split()[1], comm.split()[2])
             else:
                 print("invalid parameter")
-                conn.sendall("invalid parameter: Please follow the correct format \"UPD title filename\"".encode())        
+                conn.sendall("invalid parameter: Please follow the correct format \"UPD title filename\"".encode())
+
+        elif comm.split()[0] == "RDT":
+            if len(comm.split()) == 2:
+                read_thread(comm.split()[1])
+            else:
+                print("invalid parameter")
+                conn.sendall("invalid parameter: Please follow the correct format \"RDT title\"".encode())
+
+                            
 
        
 
