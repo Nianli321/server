@@ -3,7 +3,9 @@ import sys
 from socket import *
 import os
 import re
+import threading
 
+#thread class, representing the thread in the forum
 class Thread:
     def __init__(self, creater, title, counter):
         self.creater = creater
@@ -23,8 +25,7 @@ class Thread:
     def get_creater(self):
         return self.creater    
 
-    def delete_msg(self, number, username):
-        print(self.messages)
+    def delete_msg(self, number, username, conn):
         if int(number) not in range (1, int(self.counter) + 1):
             print ("The message doesn't exist")
             conn.sendall("The message doesn't exist".format(username).encode())     
@@ -38,7 +39,7 @@ class Thread:
             print("deleting rejected, {} is not the creater of message".format(username))
             conn.sendall("deleting rejected, {} is not the creater of message".format(username).encode()) 
     
-    def edit_msg(self, number, message):
+    def edit_msg(self, username, number, message, conn):
         if int(number) not in range (1, int(self.counter) + 1):
             print ("The message doesn't exist")
             conn.sendall("The message doesn't exist".format(username).encode())     
@@ -70,8 +71,11 @@ class Thread:
         self.messages.append("{} uploaded {}".format(username, file_name) + "\n")
         with open(self.title, "a") as f:
             f.write("{} uploaded {}".format(username, file_name) + "\n")
-    
-
+    #return the username of the user who posted the message
+    def get_message_poster(self, number):
+        index = self.get_message(int(number))
+        poster = self.messages[index].split(":")[0]
+        return poster
     #return the index of the message in the messages list, upload message will be skipped
     def get_message(self, number):
         counter = 0
@@ -106,32 +110,33 @@ def initialize_forum():
         
 
 #check username and password, and return true and false
-def check_credetial(username, password):
+def check_credetial(u_and_p):
+    
     f = open("credentials.txt", "r")
     for line in f:
-        if line.split()[0] == username and line.split()[1] == password:
+        if line.rstrip("\n") == u_and_p.rstrip("\n"):
             return True
     f.close() 
     return False
 
 #create a new file, write user's name and return True
 #otherwise return False
-def create_thread (username, title):
+def create_thread (username, title, conn):
     global threads
     if title in map(Thread.get_title, threads):
-        print("Thread {} exists".format(comm.split()[1]))
-        conn.sendall("Thread {} exists".format(title).encode())
+        print("Thread {} exists".format(title))
+        conn.send(b"ET")
     else:
+        conn.send(b"OK")
+        print("send ok")
         with open(title, "x") as f:
             f.write(username + "\n")
         new_thread = Thread(username, title, 0)   
         threads.append(new_thread)
         thread_titles.append(new_thread.get_title())
         print("Thread {} created".format(title))
-        conn.sendall("Thread {} created".format(title).encode())
 
-
-def post_message (username, title, message):
+def post_message (username, title, message, conn):
     thread = find_thread(title)
     if thread != False:#thread exist, add message 
         thread.add_msg(username, message)
@@ -141,7 +146,7 @@ def post_message (username, title, message):
         print("post failed, {} thread doesn't exist".format(title))
         conn.sendall("post failed, {} thread doesn't exist".format(title).encode())
 
-def delete_message (username, title, n_msg):
+def delete_message (username, title, n_msg, conn):
     thread = find_thread(title)
     if thread == False:
         print("deleting failed, {} thread doesn't exist".format(title))
@@ -150,32 +155,39 @@ def delete_message (username, title, n_msg):
         print("deleting rejected, {} is not the creater of message {}".format(username, title))
         conn.sendall("deleting rejected, {} is not the creater of message {}".format(username, title).encode())
     else:
-        thread.delete_msg(n_msg, username)
+        with lock:
+            thread.delete_msg(n_msg, username, conn)
 
-def edit_message(username, title, n_msg, message):
+def edit_message(username, title, n_msg, message, conn):
     thread = find_thread(title)
     if thread == False:
         print("editing failed, {} thread doesn't exist".format(title))
         conn.sendall("editing failed, {} thread doesn't exist".format(title).encode())
-    elif thread.get_creater() != username:
+    elif thread.get_message_poster(n_msg) != username:
         print("editing rejected, {} is not the creater of message {}".format(username, title))
         conn.sendall("editing rejected, {} is not the creater of message {}".format(username, title).encode())
     else:
-        thread.edit_msg(n_msg, message)
+        with lock:
+            thread.edit_msg(username, n_msg, message, conn)
 
-def read_thread(title):
+def read_thread(title, conn):
     thread = find_thread(title)
     if thread == False:
         print("reading failed, {} thread doesn't exist".format(title))
-        conn.send(b"fail")
+        conn.send(b"NX")
     else:
-        conn.send(b"R") #tell the client to get ready to revice content in the thread
+        conn.send(b"OK") #tell the client to get ready to revice content in the thread
+        #the following 2 lines of code is 
+        #cited from https://stackoverflow.com/a/20007570
+        #author: freakish   
+        l = os.path.getsize(title)
+        conn.send(byte_number_converter(l, 1))
         with open(title, "rb") as f:
             line = f.read(1024)
             while line:
                 conn.send(line)
                 line = f.read(1024)
-        conn.send(b"finish")        
+        
 
 #cited from https://stackoverflow.com/a/20007570
 #author: freakish        
@@ -199,7 +211,7 @@ def byte_number_converter(parameter, mode):
         return byte
 
 
-def upload_file(username, title, filename):
+def upload_file(username, title, filename, conn):
     thread = find_thread(title)
 
     if thread == False:
@@ -226,7 +238,7 @@ def upload_file(username, title, filename):
         thread.add_file(filename, username)
         print("uploading finish")
 
-def download_file(username, title, filename):
+def download_file(username, title, filename, conn):
     #the following pieces of code are
     #cited from https://stackoverflow.com/a/20007570
     #author: freakish
@@ -240,28 +252,155 @@ def download_file(username, title, filename):
         print("finish sending")
 
     
+def new_thread_client (conn):
+    global clients
+
+    #check password and username
+    while(1):
+        #recive username and password
+        u_and_p = conn.recv(1024).decode("utf-8")        
+        if not check_credetial(u_and_p):
+            print("Incorrect password")
+            conn.send(b"NO")
+            continue
+        
+        username = u_and_p.split()[0]
+        if username in clients:
+            conn.send(b"ET")
+            print("login rejected, client with the same username is active")
+            continue
+        break
 
 
-
-
-
-
-
-
+    clients.append(username)
+    conn.send(b"OK")
+    print("{} successful login".format(username))
     
+    while True:
+        comm = conn.recv(1024).decode("utf-8")
+        if comm == '':
+            break
+        print("{} issued {} command".format(username, comm.split()[0]))
 
+        if comm.split()[0] == "CRT":
+            with lock:
+                create_thread(username,comm.split()[1], conn)
+           
+        elif comm.split()[0] == "MSG":
+            if len(comm.split()) >= 3:
+                with lock:
+                    post_message(username, comm.split()[1], ' '.join(comm.split()[2:]), conn)   
+            else:
+                print("invalid parameter")
+                conn.sendall("invalid parameter: Please follow the correct format \"MSG Thread Message\"".encode())   
+            
+        elif comm.split()[0] == "DLT":
+            if len(comm.split()) == 3:
+                with lock:
+                    delete_message(username, comm.split()[1], comm.split()[2], conn)
+            else:
+                print("invalid parameter")
+                conn.sendall("invalid parameter: Please follow the correct format \"DLT Thread MessageNumber\"".encode())
 
+        elif comm.split()[0] == "EDT":
+            if len(comm.split()) >= 4:
+                with lock:
+                    edit_message(username, comm.split()[1], comm.split()[2], " ".join(comm.split()[3:]), conn)
+            else:
+                print("invalid parameter")
+                conn.sendall("invalid parameter: Please follow the correct format \"EDT Thread MessageNumber Message\"".encode())    
 
+        elif comm.split()[0] == "UPD":
+            if len(comm.split()) == 3:
+                with lock:
+                    upload_file(username, comm.split()[1], comm.split()[2], conn)
+            else:
+                print("invalid parameter")
+                
+
+        elif comm.split()[0] == "RDT":
+            if len(comm.split()) == 2:
+                with lock:
+                    read_thread(comm.split()[1], conn)
+            else:
+                print("invalid parameter")
+                conn.sendall("invalid parameter: Please follow the correct format \"RDT title\"".encode())
+
+        elif comm.split()[0] == "DWN":
+            filename = comm.split()[1] + "-" + comm.split()[2]
+            if comm.split()[1] not in os.listdir():
+                print("downloading failed, thread doesn't exist")
+                conn.send(b"NE")
+            elif filename not in os.listdir():
+                print("downloading failed, file doesn't exist")
+                conn.send(b"NF")
+            else:    
+                conn.send(b"OK")
+                with lock:
+                    download_file(username, comm.split()[1], filename, conn)
+        
+        elif comm.split()[0] == "RMV":
+            thread = find_thread(comm.split()[1])
+            t_name = comm.split()[1]
+            if thread == False:
+                conn.send(b"NT")
+                print("removing failed, thread doesn't exist")
+            elif thread.get_creater() != username:
+                conn.send(b"NU")
+                print("removing failed, you are not the owner of the thread")
+            else:
+                conn.send(b"OK")
+                for file in os.listdir():
+                    if file == t_name or re.search("^" + t_name + "-", file) != None:
+                        os.remove(file)
+                print("thread {} is removed".format(t_name))
+        elif comm.split()[0] == "XIT":
+            conn.close()
+            with lock:
+                clients.remove(username)
+            print("{} exited".format(username))
+            break
+        elif comm.split()[0] == "LST":
+           
+            if len(thread_titles) == 0:
+                conn.send(b"NO")
+                
+            else:
+                conn.send(b"OK")
+                with open(".threads_names", "w") as f:
+                    for t in thread_titles:
+                        f.write(t + "\n")
+
+                l = os.path.getsize(".threads_names")
+                conn.send(byte_number_converter(l, 1))
+                with open(".threads_names", "rb") as f:
+                    line = f.read(1024)
+                    while line:
+                        conn.send(line)
+                        line = f.read(1024)
+                os.remove(".threads_names")
+        elif comm.split()[0] == "SHT":
+            if comm.split()[1] == admin_passwd:
+                conn.send(b"OK")
+                print("server shuts down")
+                serverSocket.close()
+                
+            else:
+                print("SHT failed: wrong admin password")
+                conn.send(b"NO")
 
 
 
 
 if __name__ == "__main__":
-    
+
     threads = []
     thread_titles = []
     initialize_forum()
+    Thread_Counter = 0
+    clients = [] #list of active clients' username
 
+    lock = threading.Lock()
 
     #get port
     server_port = int(sys.argv[1])
@@ -277,118 +416,22 @@ if __name__ == "__main__":
         sys.exit()
 
     serverSocket.listen(1)
+    print("Waiting for clients")
     while(1):
-        print("Waiting for clients")
-    
-
-        conn, addr = serverSocket.accept()
-
-            
-        print("Client connected")
-        #recive username and password
-        username = conn.recv(1024).decode("utf-8")
+        try:
+            conn, addr = serverSocket.accept()
+        except:
+            break    
+        identity = conn.recv(2)
+        if identity == b"CL":
+            print("Client connected")
+            client_thread = threading.Thread(target=new_thread_client, args=(conn,))
+            client_thread.setDaemon(True)
+            client_thread.start()
         
-        password = conn.recv(1024).decode("utf-8")
+
         
-        #check password and username
-        while not check_credetial(username, password):
-            print("Incorrect password")
-            conn.sendall("Invalid password".encode())
-            username = conn.recv(1024).decode("utf-8")
-            password = conn.recv(1024).decode("utf-8")
         
-        conn.sendall("Welcome to the forum".encode())
-        print("{} successful login".format(username))
-        
-        while True:
-            comm = conn.recv(1024).decode("utf-8")
-            if comm == '':
-                break
-            print("{} issued {} command".format(username, comm.split()[0]))
-            if comm.split()[0] == "CRT":
-                if len(comm.split()) == 2:
-                    create_thread(username,comm.split()[1])
-                else:
-                    print("invalid parameter")
-                    conn.sendall("invalid parameter: Please follow the correct format \"CRT Thread\"".encode())
-
-            elif comm.split()[0] == "MSG":
-                if len(comm.split()) >= 3:
-                    post_message(username, comm.split()[1], ' '.join(comm.split()[2:]))   
-                else:
-                    print("invalid parameter")
-                    conn.sendall("invalid parameter: Please follow the correct format \"MSG Thread Message\"".encode())   
-                
-            elif comm.split()[0] == "DLT":
-                if len(comm.split()) == 3:
-                    delete_message(username, comm.split()[1], comm.split()[2])
-                else:
-                    print("invalid parameter")
-                    conn.sendall("invalid parameter: Please follow the correct format \"DLT Thread MessageNumber\"".encode())
-
-            elif comm.split()[0] == "EDT":
-                if len(comm.split()) == 4:
-                    edit_message(username, comm.split()[1], comm.split()[2], comm.split()[3])
-                else:
-                    print("invalid parameter")
-                    conn.sendall("invalid parameter: Please follow the correct format \"EDT Thread MessageNumber Message\"".encode())    
-
-            elif comm.split()[0] == "LST":
-                if len(comm.split()) == 1:
-                    if len(thread_titles) == 0:
-                        conn.sendall("no active thread".encode())
-                    else:
-                        conn.sendall(("The list of active threads:\n" + "\n".join(thread_titles)).encode())
-                else:
-                    print("invalid parameter")
-                    conn.sendall("invalid parameter: Please follow the correct format \"LST\"".encode())
-
-            elif comm.split()[0] == "UPD":
-                if len(comm.split()) == 3:
-                    upload_file(username, comm.split()[1], comm.split()[2])
-                else:
-                    print("invalid parameter")
-                    
-
-            elif comm.split()[0] == "RDT":
-                if len(comm.split()) == 2:
-                    read_thread(comm.split()[1])
-                else:
-                    print("invalid parameter")
-                    conn.sendall("invalid parameter: Please follow the correct format \"RDT title\"".encode())
-
-            elif comm.split()[0] == "DWN":
-                filename = comm.split()[1] + "-" + comm.split()[2]
-                if comm.split()[1] not in os.listdir():
-                    print("downloading failed, thread doesn't exist")
-                    conn.send(b"NE")
-                elif filename not in os.listdir():
-                    print("downloading failed, file doesn't exist")
-                    conn.send(b"NF")
-                else:    
-                    conn.send(b"OK")
-                    download_file(username, comm.split()[1], filename)
-            
-            elif comm.split()[0] == "RMV":
-                thread = find_thread(comm.split()[1])
-                t_name = comm.split()[1]
-                if thread == False:
-                    conn.send(b"NT")
-                    print("removing failed, thread doesn't exist")
-                elif thread.get_creater() != username:
-                    conn.send(b"NU")
-                    print("removing failed, you are not the owner of the thread")
-                else:
-                    conn.send(b"OK")
-                    for file in os.listdir():
-                        if file == t_name or re.search("^" + t_name + "-", file) != None:
-                            os.remove(file)
-                    print("thread {} is removed".format(t_name))
-            elif comm.split()[0] == "XIT":
-                conn.close()
-                print("{} exited".format(username))
-                break
-            #elif comm.split()[]
                 
 
 
