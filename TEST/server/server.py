@@ -30,15 +30,12 @@ class Thread:
             self.update()
             self.counter -= 1
             print ("The message hsa been deleted")
-                    
-    
+                        
     def edit_msg(self, username, number, message, conn):
             self.messages[self.get_message(int(number))] = username + ": " + message + "\n"
             self.update()           
             print ("The message hsa been edited")
       
-        
-
     def update(self):
         with open(self.title, "w") as f:
             f.write(self.creater + "\n")
@@ -50,11 +47,11 @@ class Thread:
                 else:
                     f.write(self.messages[i - 1])
 
-
     def add_file(self, file_name, username):
         self.messages.append("{} uploaded {}".format(username, file_name) + "\n")
         with open(self.title, "a") as f:
             f.write("{} uploaded {}".format(username, file_name) + "\n")
+
     #return the username of the user who posted the message
     def get_message_poster(self, number):
         index = self.get_message(int(number))
@@ -62,6 +59,7 @@ class Thread:
             return False
         poster = self.messages[index].split(":")[0]
         return poster
+
     #return the index of the message in the messages list, upload message will be skipped
     def get_message(self, number):
         counter = 0
@@ -72,13 +70,14 @@ class Thread:
                 continue
             else:
                 counter += 1
-            
             if counter == number:
-                return int(index)
-            
+                return int(index)            
             index += 1     
         return -1
-        
+
+#helper functions
+
+
 #find the thread and return it
 #if no, return false
 def find_thread(title):
@@ -88,8 +87,9 @@ def find_thread(title):
             return thread
     return False   
 
+
 #clean the files 
-def initialize_forum():
+def clear_forum():
     for file in os.listdir():
         if file != "client.py" and file != "server.py" and file != "credentials.txt":
             os.remove(file)
@@ -97,13 +97,13 @@ def initialize_forum():
 
 #check username and password, and return true and false
 def check_credetial(u_and_p):
-    
     f = open("credentials.txt", "r")
     for line in f:
         if line.rstrip("\n") == u_and_p.rstrip("\n"):
             return True
     f.close() 
     return False
+
 
 #create a new file, write user's name and return True
 #otherwise return False
@@ -121,6 +121,7 @@ def create_thread (username, title, conn):
         thread_titles.append(new_thread.get_title())
         print("Thread {} created".format(title))
 
+
 def post_message (username, title, message, conn):
     thread = find_thread(title)
     if thread != False:#thread exist, add message 
@@ -130,6 +131,7 @@ def post_message (username, title, message, conn):
     else:#send error when thread doesn't exist
         print("post failed, {} thread doesn't exist".format(title))
         conn.sendall("post failed, {} thread doesn't exist".format(title).encode())
+
 
 def delete_message (username, title, n_msg, conn):
     thread = find_thread(title)
@@ -147,6 +149,7 @@ def delete_message (username, title, n_msg, conn):
         with lock:
             thread.delete_msg(n_msg, username, conn)
 
+
 def edit_message(username, title, n_msg, message, conn):
     thread = find_thread(title)
     if thread == False:
@@ -154,7 +157,7 @@ def edit_message(username, title, n_msg, message, conn):
         conn.send(b"NE")
     elif thread.get_message_poster(n_msg) == False:
         print("message doesn't exist")
-        conn.send("NM")
+        conn.send(b"NM")
     elif thread.get_message_poster(n_msg) != username:
         print("editing rejected, {} is not the creater of message {}".format(username, title))
         conn.send(b"NC")
@@ -162,6 +165,7 @@ def edit_message(username, title, n_msg, message, conn):
         conn.send(b"OK")
         with lock:
             thread.edit_msg(username, n_msg, message, conn)
+
 
 def read_thread(title, conn):
     thread = find_thread(title)
@@ -183,7 +187,8 @@ def read_thread(title, conn):
         
 
 #cited from https://stackoverflow.com/a/20007570
-#author: freakish        
+#author: freakish
+#modified by Nian Li        
 #convert bytes to number
 def byte_number_converter(parameter, mode):
     if mode == 0:
@@ -231,6 +236,7 @@ def upload_file(username, title, filename, conn):
         thread.add_file(filename, username)
         print("uploading finish")
 
+
 def download_file(username, title, filename, conn):
     #the following pieces of code are
     #cited from https://stackoverflow.com/a/20007570
@@ -247,7 +253,6 @@ def download_file(username, title, filename, conn):
     
 def new_thread_client (conn):
     global clients
-
     #check password and username
     while(1):
         #recive username and password
@@ -287,15 +292,11 @@ def new_thread_client (conn):
                 print("invalid parameter")
                 conn.sendall("invalid parameter: Please follow the correct format \"MSG Thread Message\"".encode())   
             
-        elif comm.split()[0] == "DLT":
-            print("function")
-            
+        elif comm.split()[0] == "DLT":            
             delete_message(username, comm.split()[1], comm.split()[2], conn)
            
 
         elif comm.split()[0] == "EDT":
-            
-
             edit_message(username, comm.split()[1], comm.split()[2], " ".join(comm.split()[3:]), conn)
            
 
@@ -343,18 +344,19 @@ def new_thread_client (conn):
                 for file in os.listdir():
                     if file == t_name or re.search("^" + t_name + "-", file) != None:
                         os.remove(file)
+                thread_titles.remove(comm.split()[1])        
                 print("thread {} is removed".format(t_name))
+        
         elif comm.split()[0] == "XIT":
             conn.close()
             with lock:
                 clients.remove(username)
             print("{} exited".format(username))
             break
-        elif comm.split()[0] == "LST":
-           
+        
+        elif comm.split()[0] == "LST":   
             if len(thread_titles) == 0:
                 conn.send(b"NO")
-                
             else:
                 conn.send(b"OK")
                 with open(".threads_names", "w") as f:
@@ -373,6 +375,7 @@ def new_thread_client (conn):
             if comm.split()[1] == admin_passwd:
                 conn.send(b"OK")
                 print("server shuts down")
+                clear_forum()
                 serverSocket.close()
                 
             else:
@@ -386,7 +389,7 @@ if __name__ == "__main__":
 
     threads = []
     thread_titles = []
-    initialize_forum()
+    clear_forum()
     Thread_Counter = 0
     clients = [] #list of active clients' username
 
@@ -402,7 +405,7 @@ if __name__ == "__main__":
     try:
         serverSocket.bind(('localhost', server_port))
     except:
-        print("port is already occupied")
+        print("port is already occupied, please change port number")
         sys.exit()
 
     serverSocket.listen(1)
@@ -429,3 +432,4 @@ if __name__ == "__main__":
 
 
 
+ 

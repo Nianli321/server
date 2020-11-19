@@ -59,6 +59,7 @@ exit_client = 0
 
 #a thread for checking if server is alive
 thread_check_server = threading.Thread(target=thread_check_server)
+thread_check_server.daemon=True
 thread_check_server.start()
 #login
 while(1):
@@ -68,7 +69,6 @@ while(1):
             break
         else:
             print("username can't be empty, please retype it")
-    #clientSocket.sendall(username.encode())
     while(1):    
         password = input("Enter password\n")
         if password != "":
@@ -290,6 +290,6 @@ while(1):
         clientSocket.sendall(comm.encode())
         reply = clientSocket.recv(1024).decode("utf-8")
         print(reply)
-
+clientSocket.close()
         
  
