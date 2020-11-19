@@ -26,34 +26,18 @@ class Thread:
         return self.creater    
 
     def delete_msg(self, number, username, conn):
-        if int(number) not in range (1, int(self.counter) + 1):
-            print ("The message doesn't exist")
-            conn.sendall("The message doesn't exist".format(username).encode())     
-        elif self.messages[self.get_message(int(number))].split(":")[0] == username:
             self.messages.pop(self.get_message(int(number)))
             self.update()
             self.counter -= 1
             print ("The message hsa been deleted")
-            conn.sendall("The message hsa been deleted".encode())                
-        else:
-            print("deleting rejected, {} is not the creater of message".format(username))
-            conn.sendall("deleting rejected, {} is not the creater of message".format(username).encode()) 
+                    
     
     def edit_msg(self, username, number, message, conn):
-        if int(number) not in range (1, int(self.counter) + 1):
-            print ("The message doesn't exist")
-            conn.sendall("The message doesn't exist".format(username).encode())     
-        
-        elif self.messages[self.get_message(int(number))].split(":")[0] == username:
             self.messages[self.get_message(int(number))] = username + ": " + message + "\n"
-            self.update()
-            
+            self.update()           
             print ("The message hsa been edited")
-            conn.sendall("The message hsa been edited".encode())       
+      
         
-        else:
-            print("editing rejected, {} is not the creater of message".format(username))
-            conn.sendall("editing rejected, {} is not the creater of message".format(username).encode()) 
 
     def update(self):
         with open(self.title, "w") as f:
@@ -74,6 +58,8 @@ class Thread:
     #return the username of the user who posted the message
     def get_message_poster(self, number):
         index = self.get_message(int(number))
+        if index == -1:
+            return False
         poster = self.messages[index].split(":")[0]
         return poster
     #return the index of the message in the messages list, upload message will be skipped
@@ -91,7 +77,7 @@ class Thread:
                 return int(index)
             
             index += 1     
-        
+        return -1
         
 #find the thread and return it
 #if no, return false
@@ -103,7 +89,7 @@ def find_thread(title):
     return False   
 
 #clean the files 
-def clear_forum():
+def initialize_forum():
     for file in os.listdir():
         if file != "client.py" and file != "server.py" and file != "credentials.txt":
             os.remove(file)
@@ -149,11 +135,15 @@ def delete_message (username, title, n_msg, conn):
     thread = find_thread(title)
     if thread == False:
         print("deleting failed, {} thread doesn't exist".format(title))
-        conn.sendall("deleting failed, {} thread doesn't exist".format(title).encode())
-    elif thread.get_creater() != username:
+        conn.send(b"NE")
+    elif thread.get_message_poster(n_msg) == False:
+        print("message doesn't exist")
+        conn.send(b"NM")
+    elif thread.get_message_poster(n_msg) != username:
         print("deleting rejected, {} is not the creater of message {}".format(username, title))
-        conn.sendall("deleting rejected, {} is not the creater of message {}".format(username, title).encode())
+        conn.send(b"NC")
     else:
+        conn.send(b"OK")
         with lock:
             thread.delete_msg(n_msg, username, conn)
 
@@ -161,11 +151,15 @@ def edit_message(username, title, n_msg, message, conn):
     thread = find_thread(title)
     if thread == False:
         print("editing failed, {} thread doesn't exist".format(title))
-        conn.sendall("editing failed, {} thread doesn't exist".format(title).encode())
+        conn.send(b"NE")
+    elif thread.get_message_poster(n_msg) == False:
+        print("message doesn't exist")
+        conn.send("NM")
     elif thread.get_message_poster(n_msg) != username:
         print("editing rejected, {} is not the creater of message {}".format(username, title))
-        conn.sendall("editing rejected, {} is not the creater of message {}".format(username, title).encode())
+        conn.send(b"NC")
     else:
+        conn.send(b"OK")
         with lock:
             thread.edit_msg(username, n_msg, message, conn)
 
@@ -294,20 +288,16 @@ def new_thread_client (conn):
                 conn.sendall("invalid parameter: Please follow the correct format \"MSG Thread Message\"".encode())   
             
         elif comm.split()[0] == "DLT":
-            if len(comm.split()) == 3:
-                with lock:
-                    delete_message(username, comm.split()[1], comm.split()[2], conn)
-            else:
-                print("invalid parameter")
-                conn.sendall("invalid parameter: Please follow the correct format \"DLT Thread MessageNumber\"".encode())
+            print("function")
+            
+            delete_message(username, comm.split()[1], comm.split()[2], conn)
+           
 
         elif comm.split()[0] == "EDT":
-            if len(comm.split()) >= 4:
-                with lock:
-                    edit_message(username, comm.split()[1], comm.split()[2], " ".join(comm.split()[3:]), conn)
-            else:
-                print("invalid parameter")
-                conn.sendall("invalid parameter: Please follow the correct format \"EDT Thread MessageNumber Message\"".encode())    
+            
+
+            edit_message(username, comm.split()[1], comm.split()[2], " ".join(comm.split()[3:]), conn)
+           
 
         elif comm.split()[0] == "UPD":
             if len(comm.split()) == 3:
@@ -315,6 +305,7 @@ def new_thread_client (conn):
                     upload_file(username, comm.split()[1], comm.split()[2], conn)
             else:
                 print("invalid parameter")
+                
                 
 
         elif comm.split()[0] == "RDT":
@@ -382,7 +373,6 @@ def new_thread_client (conn):
             if comm.split()[1] == admin_passwd:
                 conn.send(b"OK")
                 print("server shuts down")
-                clear_forum()
                 serverSocket.close()
                 
             else:
@@ -396,7 +386,7 @@ if __name__ == "__main__":
 
     threads = []
     thread_titles = []
-    clear_forum()
+    initialize_forum()
     Thread_Counter = 0
     clients = [] #list of active clients' username
 
@@ -436,7 +426,6 @@ if __name__ == "__main__":
 
 
        
-
 
 
 
